@@ -28,6 +28,7 @@ struct CapacityParams
     enforce_leadtime::Bool
     capacity_smoothness::Real
     max_occupancy::Real
+    shortage_penalty::Real  # penalty weight for non-surge patient capacity shortage
 end
 
 struct SolverParams
@@ -50,8 +51,8 @@ function TransferParams(N, T; optimize=true, integer=true, costs=nothing, budget
     return TransferParams(optimize, integer, costs, budgets, transfer_smoothness, occupancy_smoothness, admissions_smoothness)
 end
 
-function CapacityParams(;optimize=true, costs_setup=false, costs_breakdown=false, costs_convert=false, costs_bedday=false, costs_unitday=false, ordered=false, baseline_always=false, enforce_leadtime=false, capacity_smoothness=0, max_occupancy=1)
-    return CapacityParams(optimize, costs_setup, costs_breakdown, costs_convert, costs_bedday, costs_unitday, ordered, baseline_always, enforce_leadtime, capacity_smoothness, max_occupancy)
+function CapacityParams(;optimize=true, costs_setup=false, costs_breakdown=false, costs_convert=false, costs_bedday=false, costs_unitday=false, ordered=false, baseline_always=false, enforce_leadtime=false, capacity_smoothness=0, max_occupancy=1, shortage_penalty=0)
+    return CapacityParams(optimize, costs_setup, costs_breakdown, costs_convert, costs_bedday, costs_unitday, ordered, baseline_always, enforce_leadtime, capacity_smoothness, max_occupancy, shortage_penalty)
 end
 
 function SolverParams(;timelimit=Inf, verbose=false)

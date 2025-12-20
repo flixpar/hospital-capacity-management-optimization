@@ -3,12 +3,16 @@ using JuMP
 include("config.jl")
 
 """
-    capacity_subproblem(model, arrivals, capacity_data, L, params)
+    capacity_subproblem(model, arrivals, capacity_data, L, params; nonsurge_occupancy=nothing, total_capacity=nothing)
 
 Add capacity allocation decisions and constraints to the model and return the
 augmented model plus the capacity-related objective expression.
+
+Optional kwargs for non-surge patient shortage penalty:
+- `nonsurge_occupancy`: Non-surge patient census matrix [N, T]
+- `total_capacity`: Total staffed capacity per hospital [N]
 """
-function capacity_subproblem(model, arrivals, capacity_data, L, params)
+function capacity_subproblem(model, arrivals, capacity_data, L, params; nonsurge_occupancy=nothing, total_capacity=nothing)
     N = model[:N]
     T = model[:T]
     Topt = model[:Topt]
@@ -62,11 +66,11 @@ function capacity_subproblem(model, arrivals, capacity_data, L, params)
         @constraint(model, [i=1:N, t in Topt, b in Bbaseline[i]], capacity_unit_usable[i,t,b] == 1)
     end
 
-    obj = compute_capacity_objective(model, capacity_data, params)
+    obj = compute_capacity_objective(model, capacity_data, params; nonsurge_occupancy=nonsurge_occupancy, total_capacity=total_capacity)
     return model, obj
 end
 
-function compute_capacity_objective(model, capacity_costs, params)
+function compute_capacity_objective(model, capacity_costs, params; nonsurge_occupancy=nothing, total_capacity=nothing)
     objective = @expression(model, AffExpr(0))
 
     N = model[:N]
@@ -75,6 +79,7 @@ function compute_capacity_objective(model, capacity_costs, params)
 
     capacity = model[:capacity].data
     capacity_unit_allocated = model[:capacity_unit_allocated]
+    occupancy = model[:occupancy]
 
     if params.costs_unitday
         for i in 1:N, b in 1:B[i]
@@ -128,6 +133,17 @@ function compute_capacity_objective(model, capacity_costs, params)
         @constraint(model, [i=1:N, t=1:(T-1)], capacity_smoothness_penalties[i,t] >= capacity[i,t] - capacity[i,t+1])
         @constraint(model, [i=1:N, t=1:(T-1)], capacity_smoothness_penalties[i,t] >= capacity[i,t+1] - capacity[i,t])
         add_to_expression!(objective, params.capacity_smoothness * sum(capacity_smoothness_penalties))
+    end
+
+    # Non-surge patient shortage penalty (optional)
+    # Penalizes when total census (surge + non-surge) exceeds total staffed capacity
+    if params.shortage_penalty > 0 && !isnothing(nonsurge_occupancy) && !isnothing(total_capacity)
+        # shortage[i,t] = max(0, surge_occupancy[i,t] + nonsurge_occupancy[i,t] - total_capacity[i])
+        @variable(model, shortage[i=1:N, t in Topt] >= 0)
+        @constraint(model, [i=1:N, t in Topt],
+            shortage[i,t] >= occupancy[i,t] + nonsurge_occupancy[i,t] - total_capacity[i])
+
+        add_to_expression!(objective, params.shortage_penalty * sum(shortage))
     end
 
     return objective

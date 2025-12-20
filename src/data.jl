@@ -2,8 +2,13 @@ using CSV
 using DataFrames
 using Serialization
 using Dates
+using Distributions
+using LinearAlgebra: dot
 
 include("config.jl")
+
+# Default LOS distribution for non-surge patients (shape, scale)
+const NONSURGE_LOS = Gamma(0.4872, 8.0417)
 
 alwayszero(x) = 0
 
@@ -68,6 +73,77 @@ function compute_capacity_params(
 end
 
 """
+    load_total_capacity(hospitals; patient_type=DEFAULT_PATIENT_TYPE)
+
+Load the total staffed capacity per hospital from the capacity_total CSV file.
+Returns `nothing` if the data file is not available.
+"""
+function load_total_capacity(hospitals; patient_type=DEFAULT_PATIENT_TYPE)
+    path = joinpath(PROJECT_ROOT, "data", "capacity_total_$(patient_type).csv")
+    if !isfile(path)
+        return nothing
+    end
+
+    df = DataFrame(CSV.File(path))
+    total_capacity = zeros(length(hospitals))
+    for (i, h) in enumerate(hospitals)
+        idx = findfirst(==(h), df.hospital_id)
+        if !isnothing(idx)
+            total_capacity[i] = df[idx, :beds]
+        end
+    end
+    return total_capacity
+end
+
+"""
+    load_nonsurge_data(hospitals, dates_all, surge_arrivals; patient_type=DEFAULT_PATIENT_TYPE)
+
+Load total admissions data and compute non-surge patient census.
+Non-surge admissions = total admissions - surge admissions.
+Non-surge census is computed using the NONSURGE_LOS distribution.
+Returns `nothing` if the data file is not available.
+"""
+function load_nonsurge_data(hospitals, dates_all, surge_arrivals; patient_type=DEFAULT_PATIENT_TYPE)
+    path = joinpath(PROJECT_ROOT, "data", "processed", "daily_admissions.csv")
+    if !isfile(path)
+        return nothing
+    end
+
+    df = DataFrame(CSV.File(path))
+    df.date = Date.(df.date)
+
+    N = length(hospitals)
+    T = length(dates_all)
+
+    # Build total admissions matrix
+    total_admissions = zeros(N, T)
+    for row in eachrow(df)
+        i = findfirst(==(row.hospital), hospitals)
+        t = findfirst(==(row.date), dates_all)
+        if !isnothing(i) && !isnothing(t)
+            total_admissions[i, t] = row.admissions
+        end
+    end
+
+    # Non-surge admissions = total - surge
+    nonsurge_admissions = max.(0, total_admissions .- surge_arrivals)
+
+    # Compute non-surge census using fixed LOS distribution
+    # Use CDF differences shifted by 1: P(discharge on day k) = CDF(k) - CDF(k-1)
+    # This ensures minimum 1-day LOS and avoids Inf issues with Gamma shape < 1
+    L = [t == 0 ? 0.0 : cdf(NONSURGE_LOS, t) - cdf(NONSURGE_LOS, t-1) for t in 0:T]
+    nonsurge_occupancy = zeros(N, T)
+    for i in 1:N
+        for t in 1:T
+            discharges = dot(nonsurge_admissions[i, 1:t], L[t:-1:1])
+            nonsurge_occupancy[i, t] = sum(nonsurge_admissions[i, 1:t]) - discharges
+        end
+    end
+
+    return nonsurge_occupancy
+end
+
+"""
     load_data(; start_date, end_date, patient_type=DEFAULT_PATIENT_TYPE)
 
 Load the serialized dataset and trim to the requested date range.
@@ -96,6 +172,10 @@ function load_data(; start_date::Date, end_date::Date, patient_type::Symbol=DEFA
 
     capacity = load_capacity(hospitals; patient_type)
 
+    # Load optional non-surge data (returns nothing if data unavailable)
+    total_capacity = load_total_capacity(hospitals; patient_type)
+    nonsurge_occupancy = load_nonsurge_data(hospitals, dates_all[1:end_date_idx], arrivals; patient_type)
+
     return (;
         N, T, Topt,
         start_date, end_date,
@@ -103,5 +183,7 @@ function load_data(; start_date::Date, end_date::Date, patient_type::Symbol=DEFA
         dates_all, dates_opt=dates,
         occupancy, arrivals,
         capacity,
+        total_capacity,        # optional: total staffed capacity per hospital
+        nonsurge_occupancy,    # optional: non-surge patient census [N, T]
     )
 end

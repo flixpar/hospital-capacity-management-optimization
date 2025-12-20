@@ -28,7 +28,13 @@ function unpack_decisions(model)
     capacity_unit_allocated_ = value.(model[:capacity_unit_usable])
     capacity_unit_allocated = [[capacity_unit_allocated_[i,t,b] for b in 1:B[i]] for i in 1:N, t in Topt]
 
-    return (; transfers, capacity, capacity_unit_allocated, admissions, occupancy)
+    shortage = if haskey(model, :shortage)
+        value.(model[:shortage])
+    else
+        nothing
+    end
+
+    return (; transfers, capacity, capacity_unit_allocated, admissions, occupancy, shortage)
 end
 
 """
@@ -44,9 +50,13 @@ function set_model_params!(model, params)
 end
 
 """
-    optimize_decisions(arrivals, capacity, los, Topt, capacity_params, transfer_params, solver_params)
+    optimize_decisions(arrivals, capacity, los, Topt, capacity_params, transfer_params, solver_params; nonsurge_occupancy=nothing, total_capacity=nothing)
 
 Build and solve the joint capacity/transfer optimization model.
+
+Optional kwargs for non-surge patient shortage penalty:
+- `nonsurge_occupancy`: Non-surge patient census matrix [N, T]
+- `total_capacity`: Total staffed capacity per hospital [N]
 """
 function optimize_decisions(
     arrivals::Array{<:Real,2},
@@ -55,7 +65,9 @@ function optimize_decisions(
     Topt::Array{Int,1},
     capacity_params,
     transfer_params,
-    solver_params,
+    solver_params;
+    nonsurge_occupancy=nothing,
+    total_capacity=nothing,
 )
     N, T = size(arrivals)
     B = [length(capacity[i]) for i in 1:N]
@@ -78,7 +90,9 @@ function optimize_decisions(
         objective += transfers_objective
     end
     if capacity_params.optimize
-        model, capacity_objective = capacity_subproblem(model, arrivals, capacity, L, capacity_params)
+        model, capacity_objective = capacity_subproblem(model, arrivals, capacity, L, capacity_params;
+                                                        nonsurge_occupancy=nonsurge_occupancy,
+                                                        total_capacity=total_capacity)
         objective += capacity_objective
     end
 

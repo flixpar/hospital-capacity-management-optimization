@@ -36,7 +36,9 @@ function run_experiment(
         data.Topt,
         capacity_params,
         transfer_params,
-        solver_params,
+        solver_params;
+        nonsurge_occupancy=get(data, :nonsurge_occupancy, nothing),
+        total_capacity=get(data, :total_capacity, nothing),
     )
 
     results = unpack_decisions(model)
@@ -89,7 +91,9 @@ function run_experiment_results(
         data.Topt,
         capacity_params,
         transfer_params,
-        solver_params,
+        solver_params;
+        nonsurge_occupancy=get(data, :nonsurge_occupancy, nothing),
+        total_capacity=get(data, :total_capacity, nothing),
     )
 
     results = unpack_decisions(model)
@@ -271,6 +275,32 @@ function default_scenarios(data)
                 costs_unitday=true,
                 ordered=false,
                 max_occupancy=0.95,
+            ),
+            transfer_params = TransferParams(
+                N, T;
+                optimize=false,
+                integer=false,
+                costs=0.01,
+            ),
+            solver_params = SolverParams(
+                timelimit=30.0,
+                verbose=false,
+            ),
+            show = false,
+        ),
+        (;
+            id = "base-shortage-penalty",
+            capacity_cost_fns = (;
+                cost_setup = r -> r.beds / 2,
+                cost_per_unitday = r -> ((r.capacity_level / 10) * r.beds) + (0.001 * r.priority),
+            ),
+            capacity_params = CapacityParams(
+                optimize=true,
+                costs_setup=true,
+                costs_unitday=true,
+                ordered=false,
+                max_occupancy=0.95,
+                shortage_penalty=1.0,  # penalize non-surge patient capacity shortage
             ),
             transfer_params = TransferParams(
                 N, T;
