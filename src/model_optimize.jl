@@ -30,7 +30,7 @@ function unpack_decisions(model)
     capacity_unit_allocated = [[capacity_unit_allocated_[i,t,b] for b in 1:B[i]] for i in 1:N, t in Topt]
 
     shortage = if haskey(model, :shortage)
-        value.(model[:shortage])
+        Array(value.(model[:shortage]))
     else
         nothing
     end
