@@ -1,3 +1,4 @@
+using ArgParse
 using CSV
 using DataFrames
 using Distributions
@@ -16,11 +17,36 @@ using Colors, ColorSchemes
 const ROOT = normpath(joinpath(@__DIR__, ".."))
 include(joinpath(ROOT, "src", "experiments_runner.jl"))
 
+function parse_commandline()
+    s = ArgParseSettings(
+        description = "Run hospital capacity management optimization experiments"
+    )
+
+    @add_arg_table! s begin
+        "--output", "-o"
+            help = "Output folder for results"
+            arg_type = String
+            default = DEFAULT_OUTPUT_PATH
+        "--start-date"
+            help = "Start date (YYYY-MM-DD)"
+            arg_type = String
+            default = "2021-12-15"
+        "--end-date"
+            help = "End date (YYYY-MM-DD)"
+            arg_type = String
+            default = "2022-02-15"
+    end
+
+    return parse_args(s)
+end
+
+args = parse_commandline()
+
 # Core study settings (matches the original notebook defaults)
-start_date = Date(2021, 12, 15)
-end_date = Date(2022, 2, 15)
+start_date = Date(args["start-date"])
+end_date = Date(args["end-date"])
 patient_type = DEFAULT_PATIENT_TYPE
-output_path = DEFAULT_OUTPUT_PATH
+output_path = args["output"]
 
 data = load_data(; start_date, end_date, patient_type)
 los_dists = estimate_los(data.arrivals, data.occupancy, data.Topt)
