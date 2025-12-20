@@ -129,12 +129,16 @@ function load_nonsurge_data(hospitals, dates_all, surge_arrivals; patient_type=D
     nonsurge_admissions = max.(0, total_admissions .- surge_arrivals)
 
     # Compute non-surge census using fixed LOS distribution
-    # Use CDF differences shifted by 1: P(discharge on day k) = CDF(k) - CDF(k-1)
-    # This ensures minimum 1-day LOS and avoids Inf issues with Gamma shape < 1
-    L = [t == 0 ? 0.0 : cdf(NONSURGE_LOS, t) - cdf(NONSURGE_LOS, t-1) for t in 0:T]
+    # L[k] = CDF(k-1) = P(LOS <= k-1) = probability of having discharged by day k-1
+    # For patient admitted on day s, probability still present on day t is 1 - CDF(t-s)
+    # occupancy[t] = sum_{s=1}^{t} admissions[s] * (1 - CDF(t-s))
+    #              = sum(admissions[1:t]) - sum_{s=1}^{t} admissions[s] * CDF(t-s)
+    L = [cdf(NONSURGE_LOS, t) for t in 0:T]  # L[k+1] = CDF(k) = P(discharged by day k)
     nonsurge_occupancy = zeros(N, T)
     for i in 1:N
         for t in 1:T
+            # L[t:-1:1] gives [CDF(t-1), CDF(t-2), ..., CDF(0)]
+            # dot with admissions[1:t] gives expected cumulative discharges by day t
             discharges = dot(nonsurge_admissions[i, 1:t], L[t:-1:1])
             nonsurge_occupancy[i, t] = sum(nonsurge_admissions[i, 1:t]) - discharges
         end
