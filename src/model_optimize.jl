@@ -4,6 +4,7 @@ using Gurobi
 include("los.jl")
 include("model_capacity.jl")
 include("model_transfers.jl")
+include("validation.jl")
 
 """
     unpack_decisions(model)
@@ -69,6 +70,18 @@ function optimize_decisions(
     nonsurge_occupancy=nothing,
     total_capacity=nothing,
 )
+    validate_optimize_inputs(
+        arrivals,
+        capacity,
+        los,
+        Topt,
+        capacity_params,
+        transfer_params,
+        solver_params;
+        nonsurge_occupancy=nonsurge_occupancy,
+        total_capacity=total_capacity,
+    )
+
     N, T = size(arrivals)
     B = [length(capacity[i]) for i in 1:N]
 
