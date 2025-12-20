@@ -2,6 +2,8 @@
 
 data/
 results*/
+backup/
+*.html
 
 
 ## Julia
@@ -33,3 +35,4 @@ JuliaLocalPreferences.toml
 ## Other
 
 .DS_Store
+CLAUDE.md
