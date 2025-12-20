@@ -62,6 +62,17 @@ function run_experiment(
     plot_unit_usage(data, results, metrics, 4, false, show=false, save=true, folder=exp_id, output_path=output_path)
     plot_unit_usage(data, results, metrics, 5, false, show=false, save=true, folder=exp_id, output_path=output_path)
 
+    # Non-surge shortage plots (only generated if shortage data available)
+    if !isnothing(results.shortage)
+        plot_shortage_timeline(data, results, metrics, show=show, save=true, folder=exp_id, output_path=output_path)
+        plot_system_shortage(data, results, metrics, show=show, save=true, folder=exp_id, output_path=output_path)
+
+        # Occupancy breakdown for each hospital (shows surge + non-surge vs total capacity)
+        for h_idx in 1:data.N
+            plot_occupancy_breakdown(data, results, metrics, h_idx, show=false, save=true, folder=exp_id, output_path=output_path)
+        end
+    end
+
     return (; metrics, results, data)
 end
 
@@ -448,4 +459,21 @@ function surge_level_heuristics(data, results_impractical, tfr_results, base_res
     )
 
     return surge_compare
+end
+
+"""
+    compare_scenarios(results_base, results_penalty; output_path=DEFAULT_OUTPUT_PATH)
+
+Generate a comparison plot between two scenarios (e.g., with vs without shortage penalty).
+Useful for visualizing the trade-off between capacity allocation and non-surge shortage.
+"""
+function compare_scenarios(results_base, results_penalty; output_path=DEFAULT_OUTPUT_PATH)
+    plot_scenario_comparison(
+        results_base,
+        results_penalty,
+        show=true,
+        save=true,
+        folder="compare-shortage",
+        output_path=output_path,
+    )
 end

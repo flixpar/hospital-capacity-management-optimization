@@ -431,3 +431,296 @@ function plot_surge_timeline_alt(data, results)
     # plt |> SVG(24cm, 10cm)
     return plt
 end
+
+# =============================================================================
+# Non-Surge Patient Shortage Plots
+# =============================================================================
+
+"""
+    plot_shortage_timeline(data, results, metrics; ...)
+
+Show shortage evolution over time for each hospital.
+Returns (nothing, nothing) if shortage data is not available.
+"""
+function plot_shortage_timeline(data, results, metrics; show=false, save=false, folder=nothing, output_path=DEFAULT_OUTPUT_PATH)
+    if isnothing(results.shortage)
+        return nothing, nothing
+    end
+
+    date_ticks = date_ticks_for_range(data.start_date, data.end_date)
+
+    shortage_df = DataFrame([
+        (
+            hospital_name = data.hospital_names[i],
+            date = data.dates_opt[t],
+            shortage = results.shortage[i,t],
+        )
+        for i in 1:data.N, t in 1:length(data.Topt)
+    ][:])
+
+    max_shortage = max(1.0, maximum(shortage_df.shortage))
+
+    plt = plot(
+        shortage_df,
+        x = :date,
+        y = :shortage,
+        color = :hospital_name,
+        Geom.line,
+        Guide.xlabel(""),
+        Guide.ylabel("Non-Surge Patient Shortage (Beds)"),
+        Guide.colorkey(title="Hospital"),
+        Coord.cartesian(ymin=0, ymax=max_shortage * 1.1, xmin=date_ticks[1], xmax=date_ticks[end]),
+        Guide.xticks(ticks=date_ticks),
+        Scale.x_continuous(labels=(d -> Dates.format(d, "u d, Y"))),
+        Scale.y_continuous(format=:plain),
+        layer(
+            yintercept=[0],
+            xintercept=[date_ticks[1]],
+            Geom.hline(color="lightgrey", size=0.6mm),
+            Geom.vline(color="lightgrey", size=0.6mm),
+        ),
+        style(
+            line_width=0.55mm,
+            background_color=colorant"white",
+            plot_padding=[5mm, 10mm, 5mm, 5mm];
+            fontstyles...,
+        ),
+    )
+
+    plt_size = (20cm, 10cm)
+
+    if show
+        plt |> SVG(plt_size...)
+    end
+    if save
+        savefig(plt, plt_size, output_path, folder, "shortage_timeline")
+    end
+
+    return plt, plt_size
+end
+
+"""
+    plot_occupancy_breakdown(data, results, metrics, h_idx; ...)
+
+Show surge + non-surge patient occupancy as stacked bars with total capacity threshold line.
+Returns (nothing, nothing) if non-surge or total capacity data is not available.
+"""
+function plot_occupancy_breakdown(data, results, metrics, h_idx; show=false, save=false, folder=nothing, output_path=DEFAULT_OUTPUT_PATH)
+    has_nonsurge = haskey(data, :nonsurge_occupancy) && !isnothing(data.nonsurge_occupancy)
+    has_total_capacity = haskey(data, :total_capacity) && !isnothing(data.total_capacity)
+
+    if !has_nonsurge || !has_total_capacity
+        return nothing, nothing
+    end
+
+    date_ticks = date_ticks_for_range(data.start_date, data.end_date)
+
+    # Build stacked data: non-surge first (bottom), then surge (top)
+    T_opt = length(data.Topt)
+
+    nonsurge_df = DataFrame([
+        (
+            date = data.dates_opt[t],
+            patient_type = "Non-Surge",
+            census = data.nonsurge_occupancy[h_idx, data.Topt[t]],
+            order = 1,
+        )
+        for t in 1:T_opt
+    ])
+
+    surge_df = DataFrame([
+        (
+            date = data.dates_opt[t],
+            patient_type = "Surge (COVID-19)",
+            census = results.occupancy[h_idx, t],
+            order = 2,
+        )
+        for t in 1:T_opt
+    ])
+
+    breakdown_df = vcat(nonsurge_df, surge_df)
+    sort!(breakdown_df, [:date, :order])
+
+    total_cap = data.total_capacity[h_idx]
+    max_census = maximum(nonsurge_df.census .+ surge_df.census)
+    y_max = max(total_cap, max_census) * 1.1
+
+    plt = plot(
+        layer(
+            breakdown_df,
+            x = :date,
+            y = :census,
+            color = :patient_type,
+            Geom.bar(position=:stack),
+            order = -1,
+        ),
+        layer(
+            yintercept = [total_cap],
+            Geom.hline(color="black", size=1mm, style=:dash),
+            order = 100,
+        ),
+        Guide.xlabel(""),
+        Guide.ylabel("Hospital Census (Beds)"),
+        Guide.title("$(data.hospital_names[h_idx]) - Occupancy Breakdown"),
+        Guide.colorkey(title="Patient Type"),
+        Scale.color_discrete_manual(colorant"steelblue", colorant"coral", levels=["Non-Surge", "Surge (COVID-19)"]),
+        Coord.cartesian(ymin=0, ymax=y_max, xmin=date_ticks[1], xmax=date_ticks[end]),
+        Guide.xticks(ticks=date_ticks),
+        Scale.x_continuous(labels=(d -> Dates.format(d, "u d, Y"))),
+        Scale.y_continuous(format=:plain),
+        Guide.manual_color_key("", ["Total Staffed Capacity"], [colorant"black"]),
+        style(
+            background_color=colorant"white",
+            bar_spacing=0mm,
+            plot_padding=[5mm, 10mm, 5mm, 5mm];
+            fontstyles...,
+        ),
+    )
+
+    plt_size = (20cm, 10cm)
+
+    if show
+        plt |> SVG(plt_size...)
+    end
+    if save
+        savefig(plt, plt_size, output_path, folder, "occupancy_breakdown_$(h_idx)")
+    end
+
+    return plt, plt_size
+end
+
+"""
+    plot_system_shortage(data, results, metrics; ...)
+
+Show aggregate shortage across the entire hospital system.
+Returns (nothing, nothing) if shortage data is not available.
+"""
+function plot_system_shortage(data, results, metrics; show=false, save=false, folder=nothing, output_path=DEFAULT_OUTPUT_PATH)
+    if isnothing(results.shortage)
+        return nothing, nothing
+    end
+
+    date_ticks = date_ticks_for_range(data.start_date, data.end_date)
+
+    system_shortage = vec(sum(results.shortage, dims=1))
+
+    shortage_df = DataFrame(
+        date = data.dates_opt,
+        shortage = system_shortage,
+        zero = fill(0.0, length(system_shortage)),
+    )
+
+    max_shortage = max(1.0, maximum(system_shortage))
+
+    plt = plot(
+        layer(
+            shortage_df,
+            x = :date,
+            ymin = :zero,
+            ymax = :shortage,
+            Geom.ribbon,
+            style(default_color=colorant"rgba(180,50,50,0.3)"),
+            order = -1,
+        ),
+        layer(
+            shortage_df,
+            x = :date,
+            y = :shortage,
+            Geom.line,
+            Geom.point,
+            style(
+                line_width=0.7mm,
+                default_color=colorant"darkred",
+                point_size=2pt,
+            ),
+            order = 100,
+        ),
+        layer(
+            yintercept=[0],
+            Geom.hline(color="lightgrey", size=0.6mm),
+        ),
+        Guide.xlabel(""),
+        Guide.ylabel("System-Wide Shortage (Beds)"),
+        Coord.cartesian(ymin=0, ymax=max_shortage * 1.1, xmin=date_ticks[1], xmax=date_ticks[end]),
+        Guide.xticks(ticks=date_ticks),
+        Scale.x_continuous(labels=(d -> Dates.format(d, "u d, Y"))),
+        Scale.y_continuous(format=:plain),
+        style(
+            background_color=colorant"white",
+            plot_padding=[5mm, 10mm, 5mm, 5mm];
+            fontstyles...,
+        ),
+    )
+
+    plt_size = (20cm, 10cm)
+
+    if show
+        plt |> SVG(plt_size...)
+    end
+    if save
+        savefig(plt, plt_size, output_path, folder, "system_shortage")
+    end
+
+    return plt, plt_size
+end
+
+"""
+    plot_scenario_comparison(results_base, results_penalty; ...)
+
+Compare key metrics between two scenarios (e.g., with vs without shortage penalty).
+"""
+function plot_scenario_comparison(results_base, results_penalty; show=false, save=false, folder=nothing, output_path=DEFAULT_OUTPUT_PATH)
+    # Extract metrics from both scenarios
+    base_shortage = isnothing(results_base.metrics.total.total_shortage) ? 0.0 : results_base.metrics.total.total_shortage
+    base_peak = isnothing(results_base.metrics.total.peak_shortage) ? 0.0 : results_base.metrics.total.peak_shortage
+    base_days = isnothing(results_base.metrics.total.shortage_days) ? 0 : results_base.metrics.total.shortage_days
+    base_capacity = sum(results_base.results.capacity)
+
+    penalty_shortage = isnothing(results_penalty.metrics.total.total_shortage) ? 0.0 : results_penalty.metrics.total.total_shortage
+    penalty_peak = isnothing(results_penalty.metrics.total.peak_shortage) ? 0.0 : results_penalty.metrics.total.peak_shortage
+    penalty_days = isnothing(results_penalty.metrics.total.shortage_days) ? 0 : results_penalty.metrics.total.shortage_days
+    penalty_capacity = sum(results_penalty.results.capacity)
+
+    comparison_df = DataFrame([
+        (scenario = "Base (No Penalty)", metric = "Total Shortage", value = base_shortage),
+        (scenario = "Base (No Penalty)", metric = "Peak Shortage", value = base_peak),
+        (scenario = "Base (No Penalty)", metric = "Shortage Days", value = Float64(base_days)),
+        (scenario = "Base (No Penalty)", metric = "Capacity (Bed-Days)", value = base_capacity / 1000),  # Scale down for visibility
+        (scenario = "With Shortage Penalty", metric = "Total Shortage", value = penalty_shortage),
+        (scenario = "With Shortage Penalty", metric = "Peak Shortage", value = penalty_peak),
+        (scenario = "With Shortage Penalty", metric = "Shortage Days", value = Float64(penalty_days)),
+        (scenario = "With Shortage Penalty", metric = "Capacity (Bed-Days)", value = penalty_capacity / 1000),
+    ])
+
+    plt = plot(
+        comparison_df,
+        x = :metric,
+        y = :value,
+        color = :scenario,
+        Geom.bar(position=:dodge),
+        Guide.xlabel(""),
+        Guide.ylabel("Value (Capacity in thousands)"),
+        Guide.title("Scenario Comparison: Impact of Shortage Penalty"),
+        Guide.colorkey(title="Scenario"),
+        Scale.color_discrete_manual(colorant"steelblue", colorant"coral", levels=["Base (No Penalty)", "With Shortage Penalty"]),
+        Coord.cartesian(ymin=0),
+        Scale.y_continuous(format=:plain),
+        style(
+            background_color=colorant"white",
+            bar_spacing=2mm,
+            plot_padding=[5mm, 10mm, 5mm, 5mm];
+            fontstyles...,
+        ),
+    )
+
+    plt_size = (22cm, 10cm)
+
+    if show
+        plt |> SVG(plt_size...)
+    end
+    if save
+        savefig(plt, plt_size, output_path, folder, "scenario_comparison")
+    end
+
+    return plt, plt_size
+end
